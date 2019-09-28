@@ -45,24 +45,7 @@ curl 保持长连接， 连接生命周期与php-fpm生命周期一致。
    
    i） 编写如下文件curl.php
    
-   <?php
-
-   echo "\n-------------------------------------------------\n\n";
-
-   $curlobj = curl_init_p("http://39.156.69.79/");
-   $rtn = curl_exec($curlobj);
-   curl_close($curlobj);
-
-   echo "\n-------------------------------------------------\n\n";
-
-   $curlobj = curl_init_p("http://39.156.69.79/");
-   $rtn = curl_exec($curlobj);
-   curl_close($curlobj);
-
-
-   echo "\n-------------------------------------------------\n\n";
-   
-   ?>
+   ![image](https://github.com/11061055/php-7.3.0-ext-curl/blob/master/images/test.png)
    
    
    ii）在php.ini中增加curl扩展，运行如下命令执行文件：
@@ -71,6 +54,6 @@ curl 保持长连接， 连接生命周期与php-fpm生命周期一致。
    
    得到如下结果：
    
-   
+   ![image](https://github.com/11061055/php-7.3.0-ext-curl/blob/master/images/result.png)
 
    可见，两次请求使用的是同一个连接，且连接在5秒后，进程退出的时候释放的。
