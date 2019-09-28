@@ -69,40 +69,8 @@ curl 保持长连接， 连接生命周期与php-fpm生命周期一致。
    
    /usr/local/php/php7.30/bin/php -c /usr/local/php/php7.30/etc/php.ini -f curl.php
    
-   得到如下结果：：
-
--------------------------------------------------
-
-11:32:26.198309 IP 192.168.0.102.51205 > 39.156.69.79.http: Flags [S], seq 16760035, win 65535, options [mss 1460,nop,wscale 6,nop,nop,TS val 277858728 ecr 0,sackOK,eol], length 0
-11:32:26.207817 IP 39.156.69.79.http > 192.168.0.102.51205: Flags [S.], seq 733639993, ack 16760036, win 8192, options [mss 1412,nop,wscale 5,nop,nop,nop,nop,nop,nop,nop,nop,nop,nop,nop,nop,sackOK,eol], length 0
-11:32:26.207886 IP 192.168.0.102.51205 > 39.156.69.79.http: Flags [.], ack 1, win 4096, length 0
-11:32:26.208112 IP 192.168.0.102.51205 > 39.156.69.79.http: Flags [P.], seq 1:52, ack 1, win 4096, length 51: HTTP: GET / HTTP/1.1
-11:32:26.220965 IP 39.156.69.79.http > 192.168.0.102.51205: Flags [.], ack 52, win 772, length 0
-11:32:26.220973 IP 39.156.69.79.http > 192.168.0.102.51205: Flags [P.], seq 1:306, ack 52, win 772, length 305: HTTP: HTTP/1.1 200 OK
-11:32:26.220975 IP 39.156.69.79.http > 192.168.0.102.51205: Flags [P.], seq 306:387, ack 52, win 772, length 81: HTTP
-11:32:26.221058 IP 192.168.0.102.51205 > 39.156.69.79.http: Flags [.], ack 306, win 4091, length 0
-11:32:26.221090 IP 192.168.0.102.51205 > 39.156.69.79.http: Flags [.], ack 387, win 4089, length 0
-<html>
-<meta http-equiv="refresh" content="0;url=http://www.baidu.com/">
-</html>
-
--------------------------------------------------
-
-11:32:26.221748 IP 192.168.0.102.51205 > 39.156.69.79.http: Flags [P.], seq 52:103, ack 387, win 4096, length 51: HTTP: GET / HTTP/1.1
-11:32:26.230722 IP 39.156.69.79.http > 192.168.0.102.51205: Flags [.], ack 103, win 772, length 0
-11:32:26.230734 IP 39.156.69.79.http > 192.168.0.102.51205: Flags [P.], seq 387:692, ack 103, win 772, length 305: HTTP: HTTP/1.1 200 OK
-11:32:26.230823 IP 192.168.0.102.51205 > 39.156.69.79.http: Flags [.], ack 692, win 4091, length 0
-<html>
-<meta http-equiv="refresh" content="0;url=http://www.baidu.com/">
-</html>
-11:32:26.231487 IP 39.156.69.79.http > 192.168.0.102.51205: Flags [P.], seq 692:773, ack 103, win 772, length 81: HTTP
-11:32:26.231600 IP 192.168.0.102.51205 > 39.156.69.79.http: Flags [.], ack 773, win 4094, length 0
-
--------------------------------------------------
-
-11:32:31.237241 IP 192.168.0.102.51205 > 39.156.69.79.http: Flags [F.], seq 103, ack 773, win 4096, length 0
-11:32:31.246904 IP 39.156.69.79.http > 192.168.0.102.51205: Flags [.], ack 104, win 772, length 0
-11:32:31.246910 IP 39.156.69.79.http > 192.168.0.102.51205: Flags [F.], seq 773, ack 104, win 772, length 0
-11:32:31.246971 IP 192.168.0.102.51205 > 39.156.69.79.http: Flags [.], ack 774, win 4096, length 0
+   得到如下结果：
+   
+   
 
    可见，两次请求使用的是同一个连接，且连接在5秒后，进程退出的时候释放的。
