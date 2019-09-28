@@ -79,6 +79,7 @@
 /* }}} */
 
 #define SMART_STR_PREALLOC 4096
+#define _MAX_URL_LEN_ 20000
 
 #include "zend_smart_str.h"
 #include "ext/standard/info.h"
@@ -86,7 +87,7 @@
 #include "ext/standard/url.h"
 #include "php_curl.h"
 
-int  le_curl;
+int  le_curl, le_pcurl;
 int  le_curl_multi_handle;
 int  le_curl_share_handle;
 
@@ -148,6 +149,8 @@ static struct gcry_thread_cbs php_curl_gnutls_tsl = {
 
 static void _php_curl_close_ex(php_curl *ch);
 static void _php_curl_close(zend_resource *rsrc);
+static void _php_curl_pclose(zend_resource *rsrc);
+static char * _msg_gen(char *msg, int len, const char *fmt, ...);
 
 
 #define SAVE_CURL_ERROR(__handle, __err) (__handle)->err.no = (int) __err;
@@ -448,6 +451,7 @@ ZEND_END_ARG_INFO()
  */
 static const zend_function_entry curl_functions[] = {
 	PHP_FE(curl_init,                arginfo_curl_init)
+	PHP_FE(curl_init_p,              arginfo_curl_init)
 	PHP_FE(curl_copy_handle,         arginfo_curl_copy_handle)
 	PHP_FE(curl_version,             arginfo_curl_version)
 	PHP_FE(curl_setopt,              arginfo_curl_setopt)
@@ -642,6 +646,11 @@ PHP_MINFO_FUNCTION(curl)
 PHP_MINIT_FUNCTION(curl)
 {
 	le_curl = zend_register_list_destructors_ex(_php_curl_close, NULL, "curl", module_number);
+
+	// regist a callback function _php_curl_pclose to close a connection and recycle resource when php-fpm exit
+
+	le_pcurl = zend_register_list_destructors_ex(NULL, _php_curl_pclose, "curl", module_number);
+
 	le_curl_multi_handle = zend_register_list_destructors_ex(_php_curl_multi_close, NULL, "curl_multi", module_number);
 	le_curl_share_handle = zend_register_list_destructors_ex(_php_curl_share_close, NULL, "curl_share", module_number);
 
@@ -2051,6 +2060,166 @@ PHP_FUNCTION(curl_init)
 	}
 
 	ZVAL_RES(return_value, zend_register_resource(ch, le_curl));
+	ch->res = Z_RES_P(return_value);
+}
+/* }}} */
+
+/* {{{ proto resource curl_init_p([string url])
+   Initialize a cURL session with a persistent connection*/
+PHP_FUNCTION(curl_init_p)
+{
+	php_curl *ch;
+	CURL 	 *cp;
+	zend_string *url = NULL;
+	php_url* url_resource;
+
+	ZEND_PARSE_PARAMETERS_START(0,1)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_STR(url)
+	ZEND_PARSE_PARAMETERS_END();
+
+    if (ZSTR_LEN(url) > _MAX_URL_LEN_ - 100) {
+
+        char msg[_MAX_URL_LEN_];
+        php_error_docref(NULL, E_WARNING, (const char *)_msg_gen(msg, _MAX_URL_LEN_, "url %s is too long !", ZSTR_VAL(url)));
+
+        RETURN_FALSE;
+    }
+
+    url_resource = php_url_parse_ex(ZSTR_VAL(url), ZSTR_LEN(url));
+
+    if (url_resource == NULL) {
+
+        char msg[_MAX_URL_LEN_];
+        php_error_docref(NULL, E_WARNING, (const char *)_msg_gen(msg, _MAX_URL_LEN_, "parse url error %s !", ZSTR_VAL(url)));
+
+        php_url_free(url_resource);
+
+        RETURN_FALSE;
+    }
+    if (!url_resource->scheme) {
+
+        char msg[_MAX_URL_LEN_];
+        php_error_docref(NULL, E_WARNING, (const char *)_msg_gen(msg, _MAX_URL_LEN_, "url scheme error %s !", ZSTR_VAL(url)));
+
+        php_url_free(url_resource);
+
+        RETURN_FALSE;
+    }
+    if (!url_resource->host) {
+
+        char msg[_MAX_URL_LEN_];
+        php_error_docref(NULL, E_WARNING, (const char *)_msg_gen(msg, _MAX_URL_LEN_, "url host error %s !", ZSTR_VAL(url)));
+
+        php_url_free(url_resource);
+
+        RETURN_FALSE;
+    }
+    if (!url_resource->port){
+        url_resource->port = 80;
+    }
+
+    char domain_info[_MAX_URL_LEN_];
+    char *hkey = _msg_gen(domain_info, _MAX_URL_LEN_, "curl__%s_%s:%d", ZSTR_VAL(url_resource->scheme), ZSTR_VAL(url_resource->host), url_resource->port);
+    int hkey_len = strlen((const *)hkey);
+
+    php_url_free(url_resource);
+
+    zend_resource *le;
+
+    // find whether a connection handler to scheme://host:port already exists in cache
+    if ((le = zend_hash_str_find_ptr(&EG(persistent_list), hkey, hkey_len)) != NULL) {
+    	if (le->type != le_pcurl) {
+
+            char msg[_MAX_URL_LEN_];
+            php_error_docref(NULL, E_WARNING, (const char *)_msg_gen(msg, _MAX_URL_LEN_, "unexcepted persistent connection error %s !", hkey));
+
+            RETURN_FALSE;
+    	}
+
+        zend_resource *new_le = (zend_resource *) le->ptr;
+
+        // find a connection handler
+    	cp = (CURL *) new_le->ptr;
+
+    } else {
+
+        // no connection handler exists in cache, so init a handler
+	    cp = curl_easy_init();
+	    if (!cp) {
+
+            char msg[_MAX_URL_LEN_];
+            php_error_docref(NULL, E_WARNING, (const char *)_msg_gen(msg, _MAX_URL_LEN_, "could not initialize a new cURL handle for %s !", hkey));
+
+            RETURN_FALSE;
+	    }
+
+	    curl_easy_setopt(cp, CURLOPT_FORBID_REUSE, 0L);
+	    curl_easy_setopt(cp, CURLOPT_FRESH_CONNECT, 0L);
+
+	    #if LIBCURL_VERSION_NUM >= 0x071900 /* Available since 7.25.0 */
+
+            curl_easy_setopt(cp, CURLOPT_TCP_KEEPALIVE, 1L);
+
+            //read from php.ini
+            long curl_keepidle = zend_ini_long("curl.tcp_keepidle", sizeof("curl.tcp_keepidle"), 1800);
+            if (curl_keepidle < 0){
+                curl_keepidle = 1800;
+            }
+            curl_easy_setopt(cp, CURLOPT_TCP_KEEPIDLE, curl_keepidle);
+
+        #endif
+
+        // allocated here and to be freed in _php_curl_pclose when php-fpm exit
+        zend_resource *new_le = (zend_resource *) malloc(sizeof(zend_resource));
+
+        if (!new_le) {
+
+            char msg[_MAX_URL_LEN_];
+            php_error_docref(NULL, E_WARNING, (const char *)_msg_gen(msg, _MAX_URL_LEN_, "could not initialize a new resource le for %s !", hkey));
+
+            RETURN_FALSE;
+        }
+
+        new_le->type = le_pcurl;
+        new_le->ptr = cp;
+
+        // regist the connection handler to scheme://host:port to cache
+        if (zend_register_persistent_resource(hkey, hkey_len, new_le, le_pcurl) == NULL) {
+
+            free(new_le);
+
+            char msg[_MAX_URL_LEN_];
+            php_error_docref(NULL, E_WARNING, (const char *)_msg_gen(msg, _MAX_URL_LEN_, "regist persistent connection error for %s !", hkey));
+
+            RETURN_FALSE;
+        }
+    }
+
+	ch = alloc_curl_handle();
+	ch->cp = cp;
+	ch->is_persistent = 1; // cp is a persistent connection handler
+
+	ch->handlers->write->method = PHP_CURL_STDOUT;
+	ch->handlers->read->method  = PHP_CURL_DIRECT;
+	ch->handlers->write_header->method = PHP_CURL_IGNORE;
+
+	_php_curl_set_default_options(ch);
+
+	if (url) {
+		if (php_curl_option_url(ch, ZSTR_VAL(url), ZSTR_LEN(url)) == FAILURE) {
+
+			_php_curl_close_ex(ch);
+
+            char msg[_MAX_URL_LEN_];
+            php_error_docref(NULL, E_WARNING, (const char *)_msg_gen(msg, _MAX_URL_LEN_, "set url option error for %s !", hkey));
+
+            RETURN_FALSE;
+		}
+	}
+
+	ZVAL_RES(return_value, zend_register_resource(ch, le_curl));
+
 	ch->res = Z_RES_P(return_value);
 }
 /* }}} */
@@ -3506,6 +3675,7 @@ PHP_FUNCTION(curl_close)
    List destructor for curl handles */
 static void _php_curl_close_ex(php_curl *ch)
 {
+
 #if PHP_CURL_DEBUG
 	fprintf(stderr, "DTOR CALLED, ch = %x\n", ch);
 #endif
@@ -3523,7 +3693,8 @@ static void _php_curl_close_ex(php_curl *ch)
 	 *
 	 * Libcurl commit d021f2e8a00 fix this issue and should be part of 7.28.2
 	 */
-	if (ch->cp != NULL) {
+	if (ch->cp != NULL && !ch->is_persistent) { // cp is a persistent connection handler, so don't close the connection each time curl_close is called
+
 		curl_easy_setopt(ch->cp, CURLOPT_HEADERFUNCTION, curl_write_nothing);
 		curl_easy_setopt(ch->cp, CURLOPT_WRITEFUNCTION, curl_write_nothing);
 
@@ -3532,6 +3703,7 @@ static void _php_curl_close_ex(php_curl *ch)
 
 	/* cURL destructors should be invoked only by last curl handle */
 	if (--(*ch->clone) == 0) {
+
 		zend_llist_clean(&ch->to_free->str);
 		zend_llist_clean(&ch->to_free->post);
 		zend_hash_destroy(ch->to_free->slist);
@@ -3548,11 +3720,9 @@ static void _php_curl_close_ex(php_curl *ch)
 	if (ch->header.str) {
 		zend_string_release_ex(ch->header.str, 0);
 	}
-
 	zval_ptr_dtor(&ch->handlers->write_header->stream);
 	zval_ptr_dtor(&ch->handlers->write->stream);
 	zval_ptr_dtor(&ch->handlers->read->stream);
-
 	efree(ch->handlers->write);
 	efree(ch->handlers->write_header);
 	efree(ch->handlers->read);
@@ -3580,6 +3750,43 @@ static void _php_curl_close(zend_resource *rsrc)
 {
 	php_curl *ch = (php_curl *) rsrc->ptr;
 	_php_curl_close_ex(ch);
+}
+/* }}} */
+
+/* {{{ _php_curl_pclose()
+   Close a persistent connection when php-fpm exits.*/
+static void _php_curl_pclose(zend_resource *rsrc)
+{
+    if (rsrc->type != le_pcurl) {
+
+        char msg[100];
+        php_error_docref(NULL, E_WARNING, (const char *)_msg_gen(msg, _MAX_URL_LEN_, "unexpected _php_curl_pclose resource type !"));
+        return;
+    }
+
+    zend_resource *new_le = (zend_resource *) rsrc->ptr;
+
+    CURL* cp = (CURL *) new_le->ptr;
+    curl_easy_setopt(cp, CURLOPT_HEADERFUNCTION, curl_write_nothing);
+    curl_easy_setopt(cp, CURLOPT_WRITEFUNCTION, curl_write_nothing);
+    curl_easy_cleanup(cp);
+
+    // important ! allocated in curl_init_p
+    free(new_le);
+}
+/* }}} */
+
+
+/* {{{ _msg_gen()
+   Generate message in a specified char array for specified format */
+static char * _msg_gen(char *msg, int len, const char *fmt, ...)
+{
+    memset(msg, 0, len);
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(msg, len, (char *)fmt, args);
+    va_end(args);
+    return msg;
 }
 /* }}} */
 

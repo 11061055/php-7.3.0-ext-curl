@@ -58,7 +58,7 @@ extern zend_module_entry curl_module_entry;
 #define PHP_CURL_RETURN 4
 #define PHP_CURL_IGNORE 7
 
-extern int  le_curl;
+extern int  le_curl, le_pcurl;
 #define le_curl_name "cURL handle"
 extern int  le_curl_multi_handle;
 #define le_curl_multi_handle_name "cURL Multi Handle"
@@ -78,6 +78,7 @@ PHP_FUNCTION(curl_error);
 PHP_FUNCTION(curl_exec);
 PHP_FUNCTION(curl_getinfo);
 PHP_FUNCTION(curl_init);
+PHP_FUNCTION(curl_init_p);
 PHP_FUNCTION(curl_setopt);
 PHP_FUNCTION(curl_setopt_array);
 PHP_FUNCTION(curl_version);
@@ -179,6 +180,7 @@ typedef struct {
 	struct _php_curl_error        err;
 	zend_bool                     in_callback;
 	uint32_t*                     clone;
+	zend_bool                     is_persistent; // if a connection is persistent, set it to be 1
 } php_curl;
 
 #define CURLOPT_SAFE_UPLOAD -1
