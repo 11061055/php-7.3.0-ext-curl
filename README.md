@@ -35,7 +35,7 @@ curl 保持长连接关键代码， 连接生命周期与php-fpm生命周期一�
    
 3. 安装curl扩展
 
-   用本仓库的interface.c php_curl.h 替换原有的curl扩展对应文件，进入curl目录。
+   进入curl目录。
    运行/usr/local/php/php7.30/bin/phpize
    运行./configure --with-php-config=/usr/local/php/php7.30/bin/php-config --with-curl=/usr/local/lib/curl
    --with-curl是libcurl的安装目录
