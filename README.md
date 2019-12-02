@@ -20,7 +20,7 @@ curl 保持长连接关键代码， 连接生命周期与php-fpm生命周期一�
 
 1. redis和业务服务器同机房部署。
 2. mysql查询结果做redis缓存和代码级缓存。
-3. 公网https通道的额外消耗在每次短连接的tcp握手和ssl握手，所以将短连接改为长连接后可以节约tcp握手和ssl握手。
+3. 公网https通道的额外消耗在每次短连接的tcp握手和ssl握手，所以将https改为http\短连接改为长连接(pconnect或代理实现)后可以节约tcp握手和ssl握手。
 
 
 测试：
